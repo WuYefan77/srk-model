@@ -1,73 +1,93 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
+"""Scan inter-burst interval variability over the noise intensity."""
 
-import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+from pathlib import Path
 import time
 
-from src.srk_model import run_srk, analyze_rhythm, compute_centroid
+import matplotlib
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), os.pardir, 'data')
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+from srk_model import analyze_rhythm, simulate_srk
 
 
-def main():
-    np.random.seed(42)
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data"
 
+
+def main() -> None:
     sigmas = np.logspace(-6, -1, 25)
-    g_S = 4.0
+    g_s = 4.0
     dt = 0.1
-    T_sim = 600000
-    cv_means = []
-    cv_stds = []
+    duration = 600_000.0
+    n_trials = 10
+    cv_values = np.full((len(sigmas), n_trials), np.nan)
+    rng = np.random.default_rng(42)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    print(
+        f"CV scan: {len(sigmas)} noise levels, {n_trials} trials, "
+        f"{duration / 1000:.0f} s per trial"
+    )
+    started = time.time()
 
-    print(f"Coherence resonance scan: {len(sigmas)} sigma points, 10 trials each, 600s each")
-    start_time = time.time()
-    for idx, s_val in enumerate(sigmas):
-        trial_results = []
-        for t in range(10):
-            v_raw = run_srk(s_val, g_S, dt, T_sim, seed=idx * 100 + t)
-            res_cv = analyze_rhythm(v_raw, dt)
-            if not np.isnan(res_cv):
-                trial_results.append(res_cv)
-        if trial_results:
-            cv_means.append(np.mean(trial_results))
-            cv_stds.append(np.std(trial_results))
-        else:
-            cv_means.append(np.nan)
-            cv_stds.append(np.nan)
-        print(f"  {idx+1}/{len(sigmas)}  sigma={s_val:.5f}  CV={cv_means[-1]:.4f}")
+    for sigma_index, sigma in enumerate(sigmas):
+        for trial in range(n_trials):
+            noise = rng.normal(0.0, np.sqrt(dt), size=int(duration / dt))
+            voltage = simulate_srk(noise, dt, sigma, g_s=g_s)
+            cv_values[sigma_index, trial] = analyze_rhythm(voltage, dt)
+        finite = cv_values[sigma_index, np.isfinite(cv_values[sigma_index])]
+        mean = np.mean(finite) if len(finite) else np.nan
+        print(f"  sigma={sigma:.4e}  CV={mean:.4f}  n={len(finite)}")
 
-    print(f"Done in {time.time() - start_time:.1f}s")
+    cv_means = np.array([
+        np.mean(row[np.isfinite(row)]) if np.any(np.isfinite(row)) else np.nan
+        for row in cv_values
+    ])
+    cv_stds = np.array(
+        [np.std(row[np.isfinite(row)]) if np.any(np.isfinite(row)) else np.nan for row in cv_values]
+    )
 
-    cv_means = np.array(cv_means)
-    cv_stds = np.array(cv_stds)
+    figure, axis = plt.subplots(figsize=(8, 5.5))
+    axis.errorbar(
+        sigmas,
+        cv_means,
+        yerr=cv_stds,
+        fmt="-o",
+        capsize=4,
+        color="#d62728",
+        markerfacecolor="white",
+    )
+    axis.set_xscale("log")
+    axis.set_xlabel(r"Noise intensity $\sigma$")
+    axis.set_ylabel("Inter-burst interval CV")
+    axis.grid(True, which="both", linestyle="--", alpha=0.4)
 
-    fig, ax = plt.subplots(figsize=(9, 6.5))
-    ax.errorbar(sigmas, cv_means, yerr=cv_stds, fmt='-o', capsize=5,
-                color='#d62728', markerfacecolor='white', markeredgewidth=2,
-                markersize=8, linewidth=2)
-    ax.set_xscale('log')
-    ax.set_xlabel(r'Multiplicative Noise Intensity $\sigma$', fontsize=14)
-    ax.set_ylabel('Coefficient of Variation (CV)', fontsize=14)
-    ax.grid(True, which='both', ls='--', alpha=0.5)
-
-    valid = ~np.isnan(cv_means)
+    valid = np.isfinite(cv_means)
     if np.any(valid):
-        opt_sigma = sigmas[np.nanargmin(cv_means)]
-        ax.axvline(opt_sigma, ls='--', color='blue', alpha=0.5, label=f'CR optimum $\\sigma \\approx {opt_sigma:.2e}$')
-        ax.legend()
+        optimum = sigmas[np.nanargmin(cv_means)]
+        axis.axvline(
+            optimum,
+            linestyle="--",
+            alpha=0.6,
+            label=rf"minimum at $\sigma={optimum:.2e}$",
+        )
+        axis.legend()
 
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, 'coherence_resonance.pdf'), dpi=300)
-    print(f"Saved {OUTPUT_DIR}/coherence_resonance.pdf")
-
-    np.savez(os.path.join(OUTPUT_DIR, 'cr_scan.npz'),
-             sigmas=sigmas, cv_means=cv_means, cv_stds=cv_stds)
+    figure.tight_layout()
+    figure.savefig(OUTPUT_DIR / "coherence_resonance.pdf")
+    plt.close(figure)
+    np.savez(
+        OUTPUT_DIR / "cr_scan.npz",
+        sigmas=sigmas,
+        cv_values=cv_values,
+        cv_means=cv_means,
+        cv_stds=cv_stds,
+        dt=dt,
+        duration=duration,
+        g_s=g_s,
+    )
+    print(f"Completed in {time.time() - started:.1f} s; outputs written to {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
