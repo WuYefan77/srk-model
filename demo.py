@@ -1,30 +1,25 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+"""Minimal single-oscillator example."""
 
-from src.srk_model import run_srk, analyze_rhythm
 import numpy as np
 
+from srk_model import analyze_rhythm, simulate_srk
 
-def main():
-    print("=" * 60)
-    print("Minimal demo: 3D SRK model with Feller noise")
-    print("=" * 60)
 
+def main() -> None:
     sigma = 1.5e-4
-    g_S = 4.0
+    g_s = 4.0
     dt = 0.1
-    T_sim = 300000
+    duration = 120_000.0
 
-    v = run_srk(sigma, g_S, dt, T_sim, seed=42)
-    cv = analyze_rhythm(v, dt)
+    rng = np.random.default_rng(42)
+    noise = rng.normal(0.0, np.sqrt(dt), size=int(duration / dt))
+    voltage = simulate_srk(noise, dt, sigma, g_s=g_s)
+    cv = analyze_rhythm(voltage, dt)
 
-    print(f"  g_S = {g_S}, sigma = {sigma:.2e}")
-    print(f"  CV of inter-burst intervals = {cv:.4f}")
-    print(f"  Voltage range: [{v.min():.1f}, {v.max():.1f}] mV")
-    print()
-    print("A single run completes in ~30s on a modern CPU.")
-    print("See experiments/ for full scan scripts.")
+    print("3D SRK model with state-dependent slow-gate noise")
+    print(f"g_s={g_s}, sigma={sigma:.2e}, duration={duration / 1000:.0f} s")
+    print(f"inter-burst interval CV: {cv:.4f}")
+    print(f"voltage range: [{voltage.min():.1f}, {voltage.max():.1f}] mV")
 
 
 if __name__ == "__main__":

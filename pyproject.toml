@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "srk-model"
+version = "0.1.0"
+description = "Reusable simulation tools for a stochastic three-dimensional SRK excitable model"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Yefan Wu" }]
+dependencies = [
+    "numpy>=1.24",
+    "numba>=0.58",
+]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.7"]
+test = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["srk_model*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

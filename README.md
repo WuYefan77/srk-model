@@ -1,50 +1,93 @@
-# SRK Feller CHAOS: Noise-Induced Functional Synchronization in a 3D Excitable System
+# Stochastic SRK Model
 
-Companion code for the paper *"Breakdown of Adiabatic Scaling and Noise-Induced Functional Synchronization in Deeply Quiescent Excitable Systems"* (under review, Chaos, 2026).
+Reusable Python components from a research project on noise-driven transitions in a three-dimensional Sherman--Rinzel--Keizer (SRK) excitable system.
+
+This repository contains selected public components of the numerical workflow: single-oscillator and gap-junction-coupled simulations, burst timing statistics, coherence-resonance scans, a coupled pathwise step-size check and a synchronization comparison.
 
 ## Model
 
-A 3D Sherman-Rinzel-Keizer (SRK) excitable oscillator. The slow variable $s$ (activation of the slow potassium current) is driven by Feller-type multiplicative noise:
+The slow potassium-current activation variable follows
 
-$$ds = \frac{s_\infty(V) - s}{\tau_s} dt + \sigma \sqrt{s(1-s)}\, dW_t$$
+$$
+ds = \frac{s_\infty(V)-s}{\tau_s}\,dt
+  + \sigma\sqrt{s(1-s)}\,dW_t.
+$$
 
-The key features:
-- The diffusion coefficient $\sqrt{s(1-s)}$ vanishes at physical bounds $s \in \{0,1\}$ (Feller boundary condition)
-- $\tau_s = 20000$ ms — extreme time-scale separation from fast variables (V, n)
-- Full-truncation semi-implicit Euler scheme preserves domain $[0,1]$
+The state-dependent diffusion vanishes at the physical boundaries. The implementation evaluates the diffusion coefficient at a truncated slow-gate value and advances the drift semi-implicitly. This controls numerical boundary excursions without claiming that every finite step remains exactly inside $[0,1]$.
 
-A two-cell network coupled by gap junctions ($I_{\text{gap}} = g_c (V_1 - V_2)$) demonstrates noise-induced functional synchronization: independent cells with independent noise converge to identical phase-locked bursting when $\sigma$ is tuned to the coherence resonance optimum.
+The deterministic voltage and fast-gate dynamics use a compact three-dimensional SRK conductance model. A two-cell variant adds symmetric gap-junction coupling and independent noise inputs.
 
-## Repository Structure
-
-```
-src/
-  srk_model.py             3D SRK model, coupled variant, stats helpers (Numba)
-experiments/
-  run_cr_scan.py           Coherence resonance scan (CV vs sigma)
-  run_dt_convergence.py    Numerical convergence test (dt = 0.5..0.01 ms)
-  run_coupled_sync.py      Two-cell gap-junction sync scan
-demo.py                    Minimal single-run example
-```
-
-## Usage
+## Installation
 
 ```bash
-pip install -r requirements.txt
-python demo.py                           # ~30s single run
-python experiments/run_cr_scan.py        # ~20 min, 25 sigma x 10 trials
-python experiments/run_dt_convergence.py # ~5 min
-python experiments/run_coupled_sync.py   # ~30 min
+git clone https://github.com/WuYefan77/srk-model.git
+cd srk-model
+python -m pip install -e .
 ```
 
-Outputs (PDF figures + .npz data) are written to `data/`.
+Install plotting and test dependencies with:
 
-## Key Findings
+```bash
+python -m pip install -e ".[plots,test]"
+```
 
-- **Coherence resonance**: CV exhibits a pronounced minimum at $\sigma^* \approx 1.5 \times 10^{-4}$, corresponding to a 7.3-second bursting period. Below $\sigma^*$, the system is quiescent; above, bursting becomes noise-jittered.
-- **Adiabatic breakdown**: The standard $1/\sigma^2$ Kramers scaling fails near $\sigma^*$ — the extracted slope $R^2$ drops sharply, signaling the breakdown of the adiabatic approximation where the slow manifold is no longer a meaningful attractor at extreme quiescence.
-- **Functional synchronization**: Two independent cells coupled by weak gap junctions ($g_c = 0.1$) show a peak in spike-masked Pearson correlation at $\sigma^*$, far exceeding the baseline value at all other noise levels. This synchronization is a *functional consequence* of the coherence resonance — not imposed by the coupling itself.
+## Python API
 
-## Contact
+```python
+import numpy as np
 
-Yefan Wu, `wuyefan718@gmail.com`
+from srk_model import analyze_rhythm, simulate_srk
+
+rng = np.random.default_rng(42)
+dt = 0.1
+n_steps = 1_200_000
+noise = rng.normal(0.0, np.sqrt(dt), size=n_steps)
+
+voltage = simulate_srk(
+    noise,
+    dt,
+    sigma=1.5e-4,
+    g_s=4.0,
+)
+cv = analyze_rhythm(voltage, dt)
+print(f"inter-burst interval CV: {cv:.4f}")
+```
+
+Wiener increments are generated outside the solver. This makes random seeds, independent-noise experiments and common-random-number comparisons explicit.
+
+The public API includes:
+
+- `simulate_srk`
+- `simulate_coupled_srk`
+- `detect_burst_times`
+- `analyze_rhythm`
+- `synchronization_index`
+- `aggregate_wiener_increments`
+- `compute_log_centroid`
+
+## Included experiments
+
+```text
+experiments/
+├── run_cr_scan.py           coherence-resonance CV scan
+├── run_dt_convergence.py    coupled-path step-size sensitivity
+└── run_coupled_sync.py      coupled versus uncoupled synchronization
+```
+
+Run the lightweight example with:
+
+```bash
+python demo.py
+```
+
+Each experiment saves generated arrays and figures under `data/`, which is excluded from version control.
+
+## Numerical scope
+
+This public repository is a compact, reusable subset of the research code rather than a complete reproduction archive. It focuses on the model, numerical mechanisms and selected analyses represented by the included scripts.
+
+The experiments can be used to inspect model-specific coherence resonance, time-step sensitivity and threshold-occupancy synchronization under weak electrical coupling. Interpretation beyond these included computations belongs to the broader research analysis and is not claimed as a repository-level result.
+
+## Author
+
+Yefan Wu, University of Sydney

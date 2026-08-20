@@ -1,74 +1,92 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
+"""Check CV sensitivity using Brownian paths coupled across time steps."""
 
-import numpy as np
+from pathlib import Path
+
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 
-from src.srk_model import run_srk, analyze_rhythm
-
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), os.pardir, 'data')
+from srk_model import aggregate_wiener_increments, analyze_rhythm, simulate_srk
 
 
-def main():
-    np.random.seed(42)
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data"
 
-    dts = [0.5, 0.1, 0.05, 0.01]
+
+def main() -> None:
+    time_steps = np.array([0.5, 0.1, 0.05, 0.01])
+    reference_dt = float(np.min(time_steps))
     sigma = 1.5e-4
-    g_S = 4.0
+    g_s = 4.0
+    duration = 150_000.0
     n_trials = 5
-    T_sim = 300000
+    cv_values = np.full((len(time_steps), n_trials), np.nan)
+    rng = np.random.default_rng(42)
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    for trial in range(n_trials):
+        fine_noise = rng.normal(
+            0.0,
+            np.sqrt(reference_dt),
+            size=int(duration / reference_dt),
+        )
+        for dt_index, dt in enumerate(time_steps):
+            factor = int(round(dt / reference_dt))
+            noise = aggregate_wiener_increments(fine_noise, factor)
+            voltage = simulate_srk(noise, float(dt), sigma, g_s=g_s)
+            cv_values[dt_index, trial] = analyze_rhythm(voltage, float(dt))
 
-    results = {}
-    for dt_val in dts:
-        cvs, periods, freqs = [], [], []
-        for t in range(n_trials):
-            v = run_srk(sigma, g_S, dt_val, T_sim, seed=int(dt_val * 10000) + t)
-            cv = analyze_rhythm(v, dt_val)
-            if not np.isnan(cv):
-                cvs.append(cv)
-        if cvs:
-            results[dt_val] = {
-                'cv_mean': np.mean(cvs),
-                'cv_se': np.std(cvs) / np.sqrt(len(cvs)),
-                'n': len(cvs)
-            }
-        print(f"  dt={dt_val:5.2f} ms | CV={np.mean(cvs):.4f} ± {np.std(cvs)/np.sqrt(len(cvs)):.4f} | n={len(cvs)}")
+    cv_means = np.array([
+        np.mean(row[np.isfinite(row)]) if np.any(np.isfinite(row)) else np.nan
+        for row in cv_values
+    ])
+    cv_errors = np.array(
+        [
+            np.std(row[np.isfinite(row)]) / np.sqrt(np.count_nonzero(np.isfinite(row)))
+            if np.any(np.isfinite(row))
+            else np.nan
+            for row in cv_values
+        ]
+    )
+    reference_cv = cv_means[np.argmin(time_steps)]
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    dt_plot = list(results.keys())
-    cv_m = [results[d]['cv_mean'] for d in dt_plot]
-    cv_e = [results[d]['cv_se'] for d in dt_plot]
+    for dt, mean, error, row in zip(time_steps, cv_means, cv_errors, cv_values):
+        count = np.count_nonzero(np.isfinite(row))
+        relative_error = abs(mean - reference_cv) / reference_cv * 100.0
+        print(
+            f"dt={dt:5.2f} ms | CV={mean:.4f} +/- {error:.4f} | "
+            f"relative to dt={reference_dt:.2f}: {relative_error:.1f}% | n={count}"
+        )
 
-    axes[0].errorbar(dt_plot, cv_m, yerr=cv_e, fmt='o-', capsize=5, color='#d62728',
-                     linewidth=2, markersize=8)
-    axes[0].set_xlabel(r'$\Delta t$ (ms)', fontsize=13)
-    axes[0].set_ylabel('Coefficient of Variation (CV)', fontsize=13)
-    axes[0].set_title(r'(a) CV vs $\Delta t$', fontsize=14)
-    axes[0].grid(True, ls='--', alpha=0.5)
-    axes[0].set_xscale('log')
+    figure, axis = plt.subplots(figsize=(7.5, 5))
+    axis.errorbar(time_steps, cv_means, yerr=cv_errors, fmt="o-", capsize=5, color="#d62728")
+    axis.axhline(
+        reference_cv,
+        linestyle=":",
+        color="gray",
+        label=f"reference dt={reference_dt:g} ms",
+    )
+    axis.set_xscale("log")
+    axis.set_xlabel(r"Time step $\Delta t$ (ms)")
+    axis.set_ylabel("Inter-burst interval CV")
+    axis.grid(True, linestyle="--", alpha=0.4)
+    axis.legend()
+    figure.tight_layout()
+    figure.savefig(OUTPUT_DIR / "dt_sensitivity.pdf")
+    plt.close(figure)
 
-    if 0.1 in results:
-        ref_cv = results[0.1]['cv_mean']
-        print(f"\nConvergence (reference: dt=0.1 ms, CV={ref_cv:.4f}):")
-        for d in dts:
-            if d in results:
-                rel_err = abs(results[d]['cv_mean'] - ref_cv) / ref_cv * 100
-                print(f"  dt={d:5.2f} ms: CV={results[d]['cv_mean']:.4f}  (rel err: {rel_err:.1f}%)")
-        axes[0].axhline(ref_cv, ls=':', color='gray', alpha=0.7, label='Reference dt=0.1')
-        axes[0].legend()
-
-    axes[1].text(0.1, 0.5, 'See console output for convergence table',
-                 fontsize=12, va='center', ha='left')
-    axes[1].axis('off')
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUTPUT_DIR, 'dt_convergence.pdf'), dpi=300)
-    print(f"Saved {OUTPUT_DIR}/dt_convergence.pdf")
+    np.savez(
+        OUTPUT_DIR / "dt_sensitivity.npz",
+        time_steps=time_steps,
+        reference_dt=reference_dt,
+        cv_values=cv_values,
+        cv_means=cv_means,
+        cv_errors=cv_errors,
+        sigma=sigma,
+        g_s=g_s,
+        duration=duration,
+    )
 
 
 if __name__ == "__main__":

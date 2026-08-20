@@ -10,3 +10,7 @@ __pycache__/
 .vscode/
 .vs/
 numba-cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
