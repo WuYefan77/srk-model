@@ -9,8 +9,7 @@ This repository contains selected public components of the numerical workflow: s
 The slow potassium-current activation variable follows
 
 $$
-ds = \frac{s_\infty(V)-s}{\tau_s}\,dt
-  + \sigma\sqrt{s(1-s)}\,dW_t.
+ds = \frac{s_\infty(V)-s}{\tau_s}\,dt + \sigma\sqrt{s(1-s)}\,dW_t.
 $$
 
 The state-dependent diffusion vanishes at the physical boundaries. The implementation evaluates the diffusion coefficient at a truncated slow-gate value and advances the drift semi-implicitly. This controls numerical boundary excursions without claiming that every finite step remains exactly inside $[0,1]$.
